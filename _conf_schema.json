@@ -1,0 +1,14 @@
+{
+  "cf_account_id": {
+    "type": "string",
+    "description": "Cloudflare Account ID",
+    "hint": "在Cloudflare Dashboard右侧栏可以看到",
+    "default": ""
+  },
+  "cf_api_token": {
+    "type": "string",
+    "description": "Cloudflare API Token (cfut_ 开头)",
+    "hint": "在 https://dash.cloudflare.com/profile/api-tokens 创建，需要 Workers AI 权限",
+    "default": ""
+  }
+}
