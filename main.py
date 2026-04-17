@@ -1,13 +1,12 @@
 """Cloudflare Workers AI Provider 插件
 
 为 AstrBot 提供 Cloudflare Workers AI 的 STT 和 TTS Provider。
+在 initialize() 中动态注册，避免插件重载时的重复注册冲突。
 
 注册的 Provider 类型：
   - cf_whisper_api:   Cloudflare Whisper 语音转文字
   - cf_melotts_api:   Cloudflare MeloTTS 文字转语音（中英日韩等）
   - cf_aura_api:      Cloudflare Deepgram Aura 文字转语音（英语）
-
-在 WebUI 模型提供商中添加后，可在 AI 配置里选择使用。
 """
 
 from __future__ import annotations
@@ -20,29 +19,14 @@ import aiohttp
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.star import Context, Star, register
-from astrbot.core.provider.entities import ProviderType
+from astrbot.core.provider.entities import ProviderMetaData, ProviderType
 from astrbot.core.provider.provider import STTProvider, TTSProvider
-from astrbot.core.provider.register import register_provider_adapter
+from astrbot.core.provider.register import provider_cls_map, provider_registry
 from astrbot.core.utils.astrbot_path import get_astrbot_temp_path
 
 
-# ─── Cloudflare Whisper STT Provider ─────────────────────
+# ─── Provider 类定义（不使用装饰器，在 initialize 中手动注册）───
 
-@register_provider_adapter(
-    "cf_whisper_api",
-    "Cloudflare Whisper API",
-    provider_type=ProviderType.SPEECH_TO_TEXT,
-    default_config_tmpl={
-        "id": "cf_whisper",
-        "type": "cf_whisper_api",
-        "provider_type": "speech_to_text",
-        "enable": False,
-        "api_key": "",
-        "cf_account_id": "",
-        "model": "@cf/openai/whisper",
-        "proxy": "",
-    },
-)
 class ProviderCFWhisperAPI(STTProvider):
     """Cloudflare Workers AI Whisper 语音转文字"""
 
@@ -54,7 +38,6 @@ class ProviderCFWhisperAPI(STTProvider):
         self.proxy = provider_config.get("proxy", "")
 
     async def get_text(self, audio_url: str) -> str:
-        # 如果是 URL，先下载
         if audio_url.startswith("http"):
             audio_path = await self._download(audio_url)
         else:
@@ -111,24 +94,6 @@ class ProviderCFWhisperAPI(STTProvider):
         pass
 
 
-# ─── Cloudflare MeloTTS Provider ─────────────────────────
-
-@register_provider_adapter(
-    "cf_melotts_api",
-    "Cloudflare MeloTTS API",
-    provider_type=ProviderType.TEXT_TO_SPEECH,
-    default_config_tmpl={
-        "id": "cf_melotts",
-        "type": "cf_melotts_api",
-        "provider_type": "text_to_speech",
-        "enable": False,
-        "api_key": "",
-        "cf_account_id": "",
-        "model": "@cf/myshell-ai/melotts",
-        "language": "zh",
-        "proxy": "",
-    },
-)
 class ProviderCFMeloTTSAPI(TTSProvider):
     """Cloudflare Workers AI MeloTTS 文字转语音"""
 
@@ -182,23 +147,6 @@ class ProviderCFMeloTTSAPI(TTSProvider):
         pass
 
 
-# ─── Cloudflare Deepgram Aura TTS Provider ───────────────
-
-@register_provider_adapter(
-    "cf_aura_api",
-    "Cloudflare Aura TTS API",
-    provider_type=ProviderType.TEXT_TO_SPEECH,
-    default_config_tmpl={
-        "id": "cf_aura",
-        "type": "cf_aura_api",
-        "provider_type": "text_to_speech",
-        "enable": False,
-        "api_key": "",
-        "cf_account_id": "",
-        "model": "@cf/deepgram/aura-1",
-        "proxy": "",
-    },
-)
 class ProviderCFAuraAPI(TTSProvider):
     """Cloudflare Workers AI Deepgram Aura 文字转语音"""
 
@@ -244,6 +192,92 @@ class ProviderCFAuraAPI(TTSProvider):
         pass
 
 
+# ─── Provider 注册表 ────────────────────────────────────
+
+PROVIDERS = [
+    {
+        "type_name": "cf_whisper_api",
+        "desc": "Cloudflare Whisper API",
+        "provider_type": ProviderType.SPEECH_TO_TEXT,
+        "cls": ProviderCFWhisperAPI,
+        "default_config_tmpl": {
+            "id": "cf_whisper",
+            "type": "cf_whisper_api",
+            "provider_type": "speech_to_text",
+            "enable": False,
+            "api_key": "",
+            "cf_account_id": "",
+            "model": "@cf/openai/whisper",
+            "proxy": "",
+        },
+    },
+    {
+        "type_name": "cf_melotts_api",
+        "desc": "Cloudflare MeloTTS API",
+        "provider_type": ProviderType.TEXT_TO_SPEECH,
+        "cls": ProviderCFMeloTTSAPI,
+        "default_config_tmpl": {
+            "id": "cf_melotts",
+            "type": "cf_melotts_api",
+            "provider_type": "text_to_speech",
+            "enable": False,
+            "api_key": "",
+            "cf_account_id": "",
+            "model": "@cf/myshell-ai/melotts",
+            "language": "zh",
+            "proxy": "",
+        },
+    },
+    {
+        "type_name": "cf_aura_api",
+        "desc": "Cloudflare Aura TTS API",
+        "provider_type": ProviderType.TEXT_TO_SPEECH,
+        "cls": ProviderCFAuraAPI,
+        "default_config_tmpl": {
+            "id": "cf_aura",
+            "type": "cf_aura_api",
+            "provider_type": "text_to_speech",
+            "enable": False,
+            "api_key": "",
+            "cf_account_id": "",
+            "model": "@cf/deepgram/aura-1",
+            "proxy": "",
+        },
+    },
+]
+
+
+def _register_providers():
+    """手动注册 Provider（支持重复注册时覆盖）"""
+    for p in PROVIDERS:
+        type_name = p["type_name"]
+        tmpl = p["default_config_tmpl"]
+        if tmpl:
+            tmpl.setdefault("type", type_name)
+            tmpl.setdefault("enable", False)
+            tmpl.setdefault("id", type_name)
+
+        pm = ProviderMetaData(
+            id="default",
+            model=None,
+            type=type_name,
+            desc=p["desc"],
+            provider_type=p["provider_type"],
+            cls_type=p["cls"],
+            default_config_tmpl=tmpl,
+        )
+
+        # 覆盖旧注册（如果存在）
+        if type_name in provider_cls_map:
+            old_pm = provider_cls_map[type_name]
+            if old_pm in provider_registry:
+                provider_registry.remove(old_pm)
+
+        provider_registry.append(pm)
+        provider_cls_map[type_name] = pm
+        logger.debug(f"CF Workers AI: Provider {type_name} 已注册")
+
+
 # ─── 插件主体 ─────────────────────────────────────────────
 
 @register(
@@ -257,6 +291,7 @@ class CFWorkersAIPlugin(Star):
         super().__init__(context)
 
     async def initialize(self):
+        _register_providers()
         logger.info("CF Workers AI Provider 已加载: cf_whisper_api (ASR), cf_melotts_api (TTS), cf_aura_api (TTS)")
 
     async def terminate(self):
