@@ -1,6 +1,6 @@
 name: astrbot_plugin_cf_workers_ai
 desc: Cloudflare Workers AI Provider - 让AstrBot原生支持Cloudflare的ASR(Whisper)和TTS(MeloTTS/Aura)模型
 help: 在WebUI模型提供商中添加cf_whisper_api或cf_melotts_api类型即可使用
-version: 0.1.0
+version: 0.1.1
 author: RoyougiShiki
 repo: https://github.com/RoyougiShiki/astrbot_plugin_cf_workers_ai
