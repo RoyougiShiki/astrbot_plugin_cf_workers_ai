@@ -46,6 +46,9 @@ class ProviderCFWhisperAPI(STTProvider):
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"音频文件不存在: {audio_path}")
 
+        # 转换 SILK/AMR 为 WAV（QQ 语音实际是 SILK 格式）
+        audio_path = await self._ensure_wav(audio_path)
+
         with open(audio_path, "rb") as f:
             audio_bytes = f.read()
 
@@ -76,6 +79,52 @@ class ProviderCFWhisperAPI(STTProvider):
             raise RuntimeError(f"CF Whisper 失败: {msg}")
 
         return data.get("result", {}).get("text", "")
+
+    async def _ensure_wav(self, audio_path: str) -> str:
+        """确保音频文件为 WAV 格式，处理 QQ 的 SILK 伪装 AMR"""
+        # 检测文件格式
+        with open(audio_path, "rb") as f:
+            header = f.read(12)
+
+        # 已经是 WAV
+        if header[:4] == b"RIFF" and header[8:12] == b"WAVE":
+            return audio_path
+
+        # QQ SILK 格式（伪装成 AMR）
+        is_silk = header[0:1] == b'\x02' or b"SILK" in header
+        is_amr = header[:2] == b"#!"
+
+        if is_silk or is_amr:
+            temp_dir = get_astrbot_temp_path()
+            wav_path = os.path.join(temp_dir, f"cf_whisper_{uuid.uuid4().hex[:8]}.wav")
+
+            try:
+                if is_silk:
+                    from astrbot.core.utils.tencent_record_helper import tencent_silk_to_wav
+                    logger.info("[CF Whisper] 转换 SILK → WAV...")
+                    await tencent_silk_to_wav(audio_path, wav_path)
+                else:
+                    from astrbot.core.utils.tencent_record_helper import convert_to_pcm_wav
+                    logger.info("[CF Whisper] 转换 AMR → WAV...")
+                    await convert_to_pcm_wav(audio_path, wav_path)
+                return wav_path
+            except Exception as e:
+                logger.warning(f"[CF Whisper] SILK/AMR 转换失败: {e}，尝试 ffmpeg")
+
+        # 其他格式用 ffmpeg 转 WAV
+        ext = os.path.splitext(audio_path)[1].lower()
+        if ext not in (".wav",):
+            temp_dir = get_astrbot_temp_path()
+            wav_path = os.path.join(temp_dir, f"cf_whisper_{uuid.uuid4().hex[:8]}.wav")
+            try:
+                from astrbot.core.utils.media_utils import convert_audio_to_wav
+                logger.info(f"[CF Whisper] 转换 {ext} → WAV...")
+                await convert_audio_to_wav(audio_path, wav_path)
+                return wav_path
+            except Exception as e:
+                logger.warning(f"[CF Whisper] ffmpeg 转换失败: {e}")
+
+        return audio_path
 
     async def _download(self, url: str) -> str:
         temp_dir = get_astrbot_temp_path()
