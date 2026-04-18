@@ -60,7 +60,9 @@ class ProviderCFWhisperAPI(STTProvider):
             "Authorization": f"Bearer {self.api_token}",
             "Content-Type": "application/json",
         }
-        payload = {"audio": list(audio_bytes)}
+        # Try base64 encoding first (whisper-large-v3-turbo requires this)
+        audio_b64 = base64.b64encode(audio_bytes).decode("utf-8")
+        payload = {"audio": audio_b64}
 
         proxy_url = self.proxy if self.proxy else None
         async with aiohttp.ClientSession() as session:
